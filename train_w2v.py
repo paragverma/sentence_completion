@@ -1,12 +1,11 @@
 import preprocess
 import pickle
-from gensim.models import Word2Vec
-import gensim
+
 
 def save_sentences():
     all_sentences, unique_tokens = preprocess.process_all_docs(directory="data/Holmes_Training_Data",
                                                                save_cleaned_docs=False,
-                                                               break_at_sentence=10)
+                                                               break_at_sentence=None)
     with open("all_sentences.pkl", "wb") as f:
         pickle.dump(all_sentences, f)
     with open("unique_tokens.pkl", "wb") as f:
@@ -26,6 +25,8 @@ def load_sentences():
 save_sentences()
 all_sentences, unique_tokens = load_sentences()
 
+from gensim.models import Word2Vec
+import gensim
 model = Word2Vec(all_sentences, workers=8, size=300)
 model.wv.save_word2vec_format("word2vec_model.gsm")
 
