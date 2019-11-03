@@ -4,24 +4,60 @@ import preprocess
 import numpy as np
 from scipy import spatial
 import SIF_embedding
+import tensorflow_hub as hub
+import tensorflow as tf
+from tqdm import tqdm
+import re
 
+#w2v_model = None
 w2v_model = gensim.models.KeyedVectors.load_word2vec_format("GoogleNews-vectors-negative300.bin.gz", binary=True)
 
+
+embed = hub.Module("https://tfhub.dev/google/universal-sentence-encoder-large/3") 
 
 VECTOR_DIM = 300
 
 import warnings
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
-    
-def sentence_to_vec(sentence, strategy="average", ignore_stopwords=False, lemmatize=False, alpha=None, pc=1):
 
+
+
+def sentence_filter_gen(ignore_stopwords=False, lemmatize=False):
+    igs=ignore_stopwords
+    lmtz=lemmatize
+    
+    def apply_funct(sentence):
+        if(igs):
+            sentence = " ".join([token for token in sentence.strip().split() if token not in preprocess.stopword_list])
+        if(lmtz):
+            sentence = " ".join([token.lemma_ for token in preprocess.spacy_nlp(sentence)])
+        
+        return sentence
+    
+    return apply_funct
+    
+def sentence_filter(sentence, ignore_stopwords=False, lemmatize=False):
     if(ignore_stopwords):
         sentence = " ".join([token for token in sentence.strip().split() if token not in preprocess.stopword_list])
     if(lemmatize):
         sentence = " ".join([token.lemma_ for token in preprocess.spacy_nlp(sentence)])
+    
+    #sentence = sentence.lower()
+    #sentence = re.sub(apostrophe_re, r"\1", sentence)
+
+    
+    return sentence
+
+def sentence_to_vec(sentence, strategy="average", ignore_stopwords=False, lemmatize=False, alpha=None, pc=1):
+    
+    global w2v_model
+    global VECTOR_DIM
+    
     if(len(sentence.strip()) == 0):
         return np.zeros((1, VECTOR_DIM))
+    
+    #print(sentence)
     
     if(strategy == "average"):
         total_weight = np.zeros((1, VECTOR_DIM))
@@ -39,6 +75,8 @@ def sentence_to_vec(sentence, strategy="average", ignore_stopwords=False, lemmat
         for token in sentence.split():
             if token in w2v_model:
                 word_count += 1
+        if(word_count == 0):
+            return np.zeros((1, VECTOR_DIM))
         
         if(alpha is None):
             alpha = 2.0 / (word_count + 1)
@@ -57,11 +95,13 @@ def sentence_to_vec(sentence, strategy="average", ignore_stopwords=False, lemmat
                 word_rank_inverse = 3000000 - w2v_model.vocab[token].count
                 word_weight_stack.append(word_rank_inverse)
         
+        if(len(word_vector_stack) == 0):
+            return np.zeros((1, VECTOR_DIM))
         word_vector_stack = np.vstack(word_vector_stack)
         word_weight_stack = np.vstack(word_weight_stack)
+
     
-        #raise ValueError
-    #word_weight_stack = word_weight_stack / np.sum(word_weight_stack)
+
     
     
         return SIF_embedding.SIF_embedding(word_vector_stack, word_weight_stack, pc)
@@ -81,31 +121,58 @@ def similarity(vec1, vec2, strategy="cosine"):
     vec1 = vec1.reshape(1, -1)
     vec2 = vec2.reshape(1, -1)
     
-    if(strategy == "cosine"):
-        return 1 - spatial.distance.cosine(vec1, vec2)
+    return 1 - spatial.distance.cosine(vec1, vec2)
     
     
-def predict_answers(df, q_col="question", options=['a)','b)','c)','d)','e)'], strategy="average", lemmatize=False, ignore_stopwords=False):
+def predict_answers(odf, q_col="question", options=['a)','b)','c)','d)','e)'], pc=1, strategy="average", encoder="w2v", lemmatize=False, ignore_stopwords=False):
     
-    df[q_col] = df[q_col].apply(func=preprocess.clean_sentence_raw)
+    df = odf.copy(deep=True)
+    df[q_col] = df[q_col].apply(func=preprocess.clean_str_simple)
+    
     
     ix_to_option_dict = {i+1:option for i, option in enumerate(options)}
     
     preds = []
-    for i, row in df.iterrows():
-        sentence_vector = sentence_to_vec(row[q_col], strategy=strategy, ignore_stopwords=ignore_stopwords, lemmatize=lemmatize)
-        #print("sentence", i, row[q_col])
-        preds_i = []
-        for option in options:
-            if row[option] not in w2v_model:
-                preds_i.append(0.0)
-                continue
-            word_vector = w2v_model[row[option]]
-            preds_i.append(similarity(sentence_vector, word_vector))
-        preds.append(ix_to_option_dict[preds_i.index(max(preds_i)) + 1][:-1])
+    
+    df[q_col] = df[q_col].apply(sentence_filter_gen(ignore_stopwords=ignore_stopwords,
+                                                      lemmatize=lemmatize))
+    if(encoder == "use"):
+        with tf.Session() as session: 
+            session.run([tf.global_variables_initializer(), tf.tables_initializer()])
+            sentence_vectors = session.run(embed(df[q_col].values))
+            option_dict = dict()
+            for option in options:
+                option_dict[option] = session.run(embed(df[option].values))
+        
+        with tqdm(total=df.shape[0]) as pbar:
+            for i, row in df.iterrows():
+                preds_i = []
+                for option in options:
+                    preds_i.append(similarity(sentence_vectors[i, :], option_dict[option][i, :], strategy=strategy))
+                    #print(sentence_vectors[i, :], option_dict[option][i, :])
+                preds.append(ix_to_option_dict[preds_i.index(max(preds_i)) + 1][:-1])
+                pbar.update(1)
+        return preds
+    
+    with tqdm(total=df.shape[0]) as pbar:          
+        for i, row in df.iterrows():
+            sentence_vector = sentence_to_vec(row[q_col], strategy=strategy, pc=pc, ignore_stopwords=ignore_stopwords, lemmatize=lemmatize)
+            
+            #print("sentence", i, row[q_col])
+            preds_i = []
+            for option in options:
+                if row[option] not in w2v_model:
+                    preds_i.append(0.0)
+                    continue
+                word_vector = w2v_model[row[option]]
+                preds_i.append(similarity(sentence_vector, word_vector))
+            preds.append(ix_to_option_dict[preds_i.index(max(preds_i)) + 1][:-1])
+            pbar.update(1)
+        
     return preds
 
 df = pd.read_csv("data/testing_data.csv")
+
 answers_df = pd.read_csv("data/test_answer.csv")
 ground_truth = list(answers_df["answer"].values)
 
@@ -113,26 +180,205 @@ ground_truth = list(answers_df["answer"].values)
 from sklearn.metrics import accuracy_score
 
 
-print("Stopwords Included, Gnews Vectors")
+print("Stopwords Not Removed, Words not lemmatized, Gnews Vectors")
 predictions = predict_answers(df, strategy="average")
 print("Accuracy (Average):", accuracy_score(ground_truth, predictions))
 
 predictions = predict_answers(df, strategy="ema")
 print("Accuracy (EMA):", accuracy_score(ground_truth, predictions))
 
-predictions = predict_answers(df, strategy="sif")
-print("Accuracy (SIF):", accuracy_score(ground_truth, predictions))
+predictions = predict_answers(df, strategy="sif", pc=0)
+print("Accuracy (SIF) 0:", accuracy_score(ground_truth, predictions))
+
+predictions = predict_answers(df, strategy="sif", pc=1)
+print("Accuracy (SIF) 1:", accuracy_score(ground_truth, predictions))
+
+
+print("Stopwords Not Removed, Words Lemmatized, Gnews Vectors")
+predictions = predict_answers(df, strategy="average", lemmatize=True)
+print("Accuracy (Average):", accuracy_score(ground_truth, predictions))
+
+predictions = predict_answers(df, strategy="ema", lemmatize=True)
+print("Accuracy (EMA):", accuracy_score(ground_truth, predictions))
+
+predictions = predict_answers(df, strategy="sif", pc=0)
+print("Accuracy (SIF) 0:", accuracy_score(ground_truth, predictions))
+
+predictions = predict_answers(df, strategy="sif", pc=1)
+print("Accuracy (SIF) 1:", accuracy_score(ground_truth, predictions))
 
 
 
-print("Stopwords Removed, Gnews Vectors")
+print("Stopwords Removed, No Lemmatization, Gnews Vectors")
 predictions = predict_answers(df, strategy="average", ignore_stopwords=True)
 print("Accuracy (Average):", accuracy_score(ground_truth, predictions))
 
 predictions = predict_answers(df, strategy="ema", ignore_stopwords=True)
 print("Accuracy (EMA):", accuracy_score(ground_truth, predictions))
 
-predictions = predict_answers(df, strategy="sif", ignore_stopwords=True)
-print("Accuracy (SIF):", accuracy_score(ground_truth, predictions))
+predictions = predict_answers(df, strategy="sif", pc=0)
+print("Accuracy (SIF) 0:", accuracy_score(ground_truth, predictions))
 
+predictions = predict_answers(df, strategy="sif", pc=1)
+print("Accuracy (SIF) 1:", accuracy_score(ground_truth, predictions))
+
+
+print("Stopwords Removed, Words Lemmatized, Gnews Vectors")
+predictions = predict_answers(df, strategy="average", ignore_stopwords=True, lemmatize=True)
+print("Accuracy (Average):", accuracy_score(ground_truth, predictions))
+
+predictions = predict_answers(df, strategy="ema", ignore_stopwords=True, lemmatize=True)
+print("Accuracy (EMA):", accuracy_score(ground_truth, predictions))
+
+predictions = predict_answers(df, strategy="sif", pc=0)
+print("Accuracy (SIF) 0:", accuracy_score(ground_truth, predictions))
+
+predictions = predict_answers(df, strategy="sif", pc=1)
+print("Accuracy (SIF) 1:", accuracy_score(ground_truth, predictions))
+
+##############################################################################################
+print("Stopwords Not Removed, No lemmatization, Universal Sentence Encoder")
+predictions = predict_answers(df, encoder="use")
+print("Accuracy:", accuracy_score(ground_truth, predictions))
+
+
+print("Stopwords Not Removed, lemmatization performed, Universal Sentence Encoder")
+predictions = predict_answers(df, lemmatize=True, encoder="use")
+print("Accuracy:", accuracy_score(ground_truth, predictions))
+
+
+print("Stopwords Removed, No Lemmatization, Universal Sentence Encoder")
+predictions = predict_answers(df, strategy="average", ignore_stopwords=True, encoder="use")
+print("Accuracy:", accuracy_score(ground_truth, predictions))
+
+
+print("Stopwords Removed, lemmatization performed, Universal Sentence Encoder")
+predictions = predict_answers(df, strategy="average", ignore_stopwords=True, lemmatize=True, encoder="use")
+print("Accuracy:", accuracy_score(ground_truth, predictions))
+
+
+##############################################################################################
+
+w2v_model = gensim.models.KeyedVectors.load_word2vec_format("word2vec_model_skip_window8.gsm")
+
+print("Stopwords Not Removed, Words not lemmatized, Custom Vectors")
+predictions = predict_answers(df, strategy="average")
+print("Accuracy (Average):", accuracy_score(ground_truth, predictions))
+
+predictions = predict_answers(df, strategy="ema")
+print("Accuracy (EMA):", accuracy_score(ground_truth, predictions))
+
+predictions = predict_answers(df, strategy="sif", pc=0)
+print("Accuracy (SIF) 0:", accuracy_score(ground_truth, predictions))
+
+predictions = predict_answers(df, strategy="sif", pc=1)
+print("Accuracy (SIF) 1:", accuracy_score(ground_truth, predictions))
+
+
+print("Stopwords Not Removed, Words Lemmatized, Custom Vectors")
+predictions = predict_answers(df, strategy="average", lemmatize=True)
+print("Accuracy (Average):", accuracy_score(ground_truth, predictions))
+
+predictions = predict_answers(df, strategy="ema", lemmatize=True)
+print("Accuracy (EMA):", accuracy_score(ground_truth, predictions))
+
+predictions = predict_answers(df, strategy="sif", pc=0)
+print("Accuracy (SIF) 0:", accuracy_score(ground_truth, predictions))
+
+predictions = predict_answers(df, strategy="sif", pc=1)
+print("Accuracy (SIF) 1:", accuracy_score(ground_truth, predictions))
+
+
+
+print("Stopwords Removed, No Lemmatization, Custom Vectors")
+predictions = predict_answers(df, strategy="average", ignore_stopwords=True)
+print("Accuracy (Average):", accuracy_score(ground_truth, predictions))
+
+predictions = predict_answers(df, strategy="ema", ignore_stopwords=True)
+print("Accuracy (EMA):", accuracy_score(ground_truth, predictions))
+
+predictions = predict_answers(df, strategy="sif", pc=0)
+print("Accuracy (SIF) 0:", accuracy_score(ground_truth, predictions))
+
+predictions = predict_answers(df, strategy="sif", pc=1)
+print("Accuracy (SIF) 1:", accuracy_score(ground_truth, predictions))
+
+
+print("Stopwords Removed, Words Lemmatized, Custom Vectors")
+predictions = predict_answers(df, strategy="average", ignore_stopwords=True, lemmatize=True)
+print("Accuracy (Average):", accuracy_score(ground_truth, predictions))
+
+predictions = predict_answers(df, strategy="ema", ignore_stopwords=True, lemmatize=True)
+print("Accuracy (EMA):", accuracy_score(ground_truth, predictions))
+
+predictions = predict_answers(df, strategy="sif", pc=0)
+print("Accuracy (SIF) 0:", accuracy_score(ground_truth, predictions))
+
+predictions = predict_answers(df, strategy="sif", pc=1)
+print("Accuracy (SIF) 1:", accuracy_score(ground_truth, predictions))
+
+
+
+###################################################################################
+
+def loadGloveModel(gloveFile):
+    print("Loading Glove Model")
+    f = open(gloveFile,'r')
+    model = {}
+    n = 0
+    
+    for line in f:
+        splitLine = line.split(' ')
+        word = splitLine[0]
+        
+        try:
+            embedding = np.array([float(val) for val in splitLine[1:]])
+        except ValueError:
+            print(n, word)
+            n += 1
+            continue
+        model[word] = embedding
+        n += 1
+
+
+    print("Done.",len(model)," words loaded!")
+    return model
+
+w2v_model = loadGloveModel("glove.840B.300d.txt")
+
+print("Stopwords Not Removed, Words not lemmatized, Glove Vectors")
+predictions = predict_answers(df, strategy="average")
+print("Accuracy (Average):", accuracy_score(ground_truth, predictions))
+
+predictions = predict_answers(df, strategy="ema")
+print("Accuracy (EMA):", accuracy_score(ground_truth, predictions))
+
+
+
+print("Stopwords Not Removed, Words Lemmatized, Glove Vectors")
+predictions = predict_answers(df, strategy="average", lemmatize=True)
+print("Accuracy (Average):", accuracy_score(ground_truth, predictions))
+
+predictions = predict_answers(df, strategy="ema", lemmatize=True)
+print("Accuracy (EMA):", accuracy_score(ground_truth, predictions))
+
+
+
+
+print("Stopwords Removed, No Lemmatization, Glove Vectors")
+predictions = predict_answers(df, strategy="average", ignore_stopwords=True)
+print("Accuracy (Average):", accuracy_score(ground_truth, predictions))
+
+predictions = predict_answers(df, strategy="ema", ignore_stopwords=True)
+print("Accuracy (EMA):", accuracy_score(ground_truth, predictions))
+
+
+
+
+print("Stopwords Removed, Words Lemmatized, Glove Vectors")
+predictions = predict_answers(df, strategy="average", ignore_stopwords=True, lemmatize=True)
+print("Accuracy (Average):", accuracy_score(ground_truth, predictions))
+
+predictions = predict_answers(df, strategy="ema", ignore_stopwords=True, lemmatize=True)
+print("Accuracy (EMA):", accuracy_score(ground_truth, predictions))
 

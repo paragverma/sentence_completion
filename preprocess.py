@@ -8,6 +8,18 @@ logging.basicConfig(level=logging.INFO)
 
 stopword_list = set(["i", "me", "my", "myself", "we", "our", "ours", "ourselves", "you", "your", "yours", "yourself", "yourselves", "he", "him", "his", "himself", "she", "her", "hers", "herself", "it", "its", "itself", "they", "them", "their", "theirs", "themselves", "what", "which", "who", "whom", "this", "that", "these", "those", "am", "is", "are", "was", "were", "be", "been", "being", "have", "has", "had", "having", "do", "does", "did", "doing", "a", "an", "the", "and", "but", "if", "or", "because", "as", "until", "while", "of", "at", "by", "for", "with", "about", "against", "between", "into", "through", "during", "before", "after", "above", "below", "to", "from", "up", "down", "in", "out", "on", "off", "over", "under", "again", "further", "then", "once", "here", "there", "when", "where", "why", "how", "all", "any", "both", "each", "few", "more", "most", "other", "some", "such", "no", "nor", "not", "only", "own", "same", "so", "than", "too", "very", "s", "t", "can", "will", "just", "don", "should", "now"])
 
+multiple_whitespace_re = re.compile(r"\s+", flags=re.I)
+apostrophe_re = re.compile(r"(\w+)'s", flags=re.I)
+non_text_re = re.compile(r"[^\w ']")
+
+def clean_str_simple(string):
+    string = string.strip().lower()
+    string = re.sub(apostrophe_re, r"\1", string)
+    string = re.sub(non_text_re, " ", string)
+    string = string.replace("_", "")
+    string = re.sub(multiple_whitespace_re, " ", string)
+    return string
+    
 def clean_str(string):
     string = string.replace("\n", " ")
     string = re.sub(r"\[([^\]]+)\]", " ", string)
