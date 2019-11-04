@@ -9,6 +9,10 @@ import tensorflow as tf
 from tqdm import tqdm
 import re
 
+import logging
+
+logging.basicConfig(level=logging.WARNING)
+
 #w2v_model = None
 w2v_model = gensim.models.KeyedVectors.load_word2vec_format("GoogleNews-vectors-negative300.bin.gz", binary=True)
 
@@ -100,10 +104,6 @@ def sentence_to_vec(sentence, strategy="average", ignore_stopwords=False, lemmat
         word_vector_stack = np.vstack(word_vector_stack)
         word_weight_stack = np.vstack(word_weight_stack)
 
-    
-
-    
-    
         return SIF_embedding.SIF_embedding(word_vector_stack, word_weight_stack, pc)
 
         
@@ -124,10 +124,12 @@ def similarity(vec1, vec2, strategy="cosine"):
     return 1 - spatial.distance.cosine(vec1, vec2)
     
     
-def predict_answers(odf, q_col="question", options=['a)','b)','c)','d)','e)'], pc=1, strategy="average", encoder="w2v", lemmatize=False, ignore_stopwords=False):
+def predict_answers(odf, preprocess_data=True, q_col="question", options=['a)','b)','c)','d)','e)'], pc=1, strategy="average", encoder="w2v", lemmatize=False, ignore_stopwords=False):
     
     df = odf.copy(deep=True)
-    df[q_col] = df[q_col].apply(func=preprocess.clean_str_simple)
+    
+    if(preprocess_data):
+        df[q_col] = df[q_col].apply(func=preprocess.clean_str_simple)
     
     
     ix_to_option_dict = {i+1:option for i, option in enumerate(options)}
@@ -154,22 +156,68 @@ def predict_answers(odf, q_col="question", options=['a)','b)','c)','d)','e)'], p
                 pbar.update(1)
         return preds
     
-    with tqdm(total=df.shape[0]) as pbar:          
-        for i, row in df.iterrows():
-            sentence_vector = sentence_to_vec(row[q_col], strategy=strategy, pc=pc, ignore_stopwords=ignore_stopwords, lemmatize=lemmatize)
-            
-            #print("sentence", i, row[q_col])
-            preds_i = []
-            for option in options:
-                if row[option] not in w2v_model:
-                    preds_i.append(0.0)
-                    continue
-                word_vector = w2v_model[row[option]]
-                preds_i.append(similarity(sentence_vector, word_vector))
-            preds.append(ix_to_option_dict[preds_i.index(max(preds_i)) + 1][:-1])
-            pbar.update(1)
+    
+    with tqdm(total=df.shape[0]) as pbar:
+        if(strategy == "wmd"):
         
-    return preds
+            for i, row in df.iterrows():
+                #sentence_vector = sentence_to_vec(row[q_col], strategy=strategy, pc=pc, ignore_stopwords=ignore_stopwords, lemmatize=lemmatize)
+                sentence = row[q_col]
+                #print("sentence", i, row[q_col])
+                preds_i = []
+                
+                for option in options:
+                    row_option = preprocess.clean_str_simple(row[option])
+                    preds_i.append(w2v_model.wv.wmdistance(sentence, row_option))
+                
+                #print(preds_i)
+                preds.append(ix_to_option_dict[preds_i.index(min(preds_i)) + 1][:-1])
+                pbar.update(1)
+            
+            return preds
+        
+        elif(strategy == "n_similarity"):
+        
+            for i, row in df.iterrows():
+                #sentence_vector = sentence_to_vec(row[q_col], strategy=strategy, pc=pc, ignore_stopwords=ignore_stopwords, lemmatize=lemmatize)
+                sentence = row[q_col].strip().split()
+                sentence = [word for word in sentence if word in w2v_model]
+                #print("sentence", i, row[q_col])
+                preds_i = []
+                
+                for option in options:
+                    row_option = preprocess.clean_str_simple(row[option]).strip().split()
+                    row_option = [word for word in row_option if word in w2v_model]
+                    
+                    if(len(sentence) < 1 or len(row_option) < 1):
+                        preds_i.append(0.0)
+                        continue
+                    preds_i.append(w2v_model.wv.n_similarity(sentence, row_option))
+    
+                preds.append(ix_to_option_dict[preds_i.index(max(preds_i)) + 1][:-1])
+                pbar.update(1)
+            
+            return preds
+        
+        else:
+            for i, row in df.iterrows():
+                sentence_vector = sentence_to_vec(row[q_col], strategy=strategy, pc=pc, ignore_stopwords=ignore_stopwords, lemmatize=lemmatize)
+                
+                #print("sentence", i, row[q_col])
+                preds_i = []
+                
+                for option in options:
+                    row_option = row[option]
+                    row_option = preprocess.clean_str_simple(row_option).strip().split()[-1]
+                    if row_option not in w2v_model:
+                        preds_i.append(0.0)
+                        continue
+                    word_vector = w2v_model[row_option]
+                    preds_i.append(similarity(sentence_vector, word_vector))
+                preds.append(ix_to_option_dict[preds_i.index(max(preds_i)) + 1][:-1])
+                pbar.update(1)
+            
+            return preds
 
 df = pd.read_csv("data/testing_data.csv")
 
@@ -187,11 +235,19 @@ print("Accuracy (Average):", accuracy_score(ground_truth, predictions))
 predictions = predict_answers(df, strategy="ema")
 print("Accuracy (EMA):", accuracy_score(ground_truth, predictions))
 
+predictions = predict_answers(df, strategy="wmd")
+print("Accuracy (WMD):", accuracy_score(ground_truth, predictions))
+
+predictions = predict_answers(df, strategy="n_similarity")
+print("Accuracy (n_similarity):", accuracy_score(ground_truth, predictions))
+
 predictions = predict_answers(df, strategy="sif", pc=0)
 print("Accuracy (SIF) 0:", accuracy_score(ground_truth, predictions))
 
 predictions = predict_answers(df, strategy="sif", pc=1)
 print("Accuracy (SIF) 1:", accuracy_score(ground_truth, predictions))
+
+
 
 
 print("Stopwords Not Removed, Words Lemmatized, Gnews Vectors")
@@ -201,11 +257,18 @@ print("Accuracy (Average):", accuracy_score(ground_truth, predictions))
 predictions = predict_answers(df, strategy="ema", lemmatize=True)
 print("Accuracy (EMA):", accuracy_score(ground_truth, predictions))
 
-predictions = predict_answers(df, strategy="sif", pc=0)
+predictions = predict_answers(df, strategy="wmd", lemmatize=True)
+print("Accuracy (WMD):", accuracy_score(ground_truth, predictions))
+
+predictions = predict_answers(df, strategy="n_similarity", lemmatize=True)
+print("Accuracy (n_similarity):", accuracy_score(ground_truth, predictions))
+
+predictions = predict_answers(df, strategy="sif", pc=0, lemmatize=True)
 print("Accuracy (SIF) 0:", accuracy_score(ground_truth, predictions))
 
-predictions = predict_answers(df, strategy="sif", pc=1)
+predictions = predict_answers(df, strategy="sif", pc=1, lemmatize=True)
 print("Accuracy (SIF) 1:", accuracy_score(ground_truth, predictions))
+
 
 
 
@@ -216,11 +279,19 @@ print("Accuracy (Average):", accuracy_score(ground_truth, predictions))
 predictions = predict_answers(df, strategy="ema", ignore_stopwords=True)
 print("Accuracy (EMA):", accuracy_score(ground_truth, predictions))
 
-predictions = predict_answers(df, strategy="sif", pc=0)
+predictions = predict_answers(df, strategy="wmd", ignore_stopwords=True)
+print("Accuracy (WMD):", accuracy_score(ground_truth, predictions))
+
+predictions = predict_answers(df, strategy="n_similarity", ignore_stopwords=True)
+print("Accuracy (n_similarity):", accuracy_score(ground_truth, predictions))
+
+predictions = predict_answers(df, strategy="sif", pc=0, ignore_stopwords=True)
 print("Accuracy (SIF) 0:", accuracy_score(ground_truth, predictions))
 
-predictions = predict_answers(df, strategy="sif", pc=1)
+predictions = predict_answers(df, strategy="sif", pc=1, ignore_stopwords=True)
 print("Accuracy (SIF) 1:", accuracy_score(ground_truth, predictions))
+
+
 
 
 print("Stopwords Removed, Words Lemmatized, Gnews Vectors")
@@ -230,11 +301,19 @@ print("Accuracy (Average):", accuracy_score(ground_truth, predictions))
 predictions = predict_answers(df, strategy="ema", ignore_stopwords=True, lemmatize=True)
 print("Accuracy (EMA):", accuracy_score(ground_truth, predictions))
 
-predictions = predict_answers(df, strategy="sif", pc=0)
+predictions = predict_answers(df, strategy="wmd", ignore_stopwords=True, lemmatize=True)
+print("Accuracy (WMD):", accuracy_score(ground_truth, predictions))
+
+predictions = predict_answers(df, strategy="n_similarity", ignore_stopwords=True, lemmatize=True)
+print("Accuracy (n_similarity):", accuracy_score(ground_truth, predictions))
+
+predictions = predict_answers(df, strategy="sif", pc=0, ignore_stopwords=True, lemmatize=True)
 print("Accuracy (SIF) 0:", accuracy_score(ground_truth, predictions))
 
-predictions = predict_answers(df, strategy="sif", pc=1)
+predictions = predict_answers(df, strategy="sif", pc=1, ignore_stopwords=True, lemmatize=True)
 print("Accuracy (SIF) 1:", accuracy_score(ground_truth, predictions))
+
+
 
 ##############################################################################################
 print("Stopwords Not Removed, No lemmatization, Universal Sentence Encoder")
@@ -268,11 +347,20 @@ print("Accuracy (Average):", accuracy_score(ground_truth, predictions))
 predictions = predict_answers(df, strategy="ema")
 print("Accuracy (EMA):", accuracy_score(ground_truth, predictions))
 
+predictions = predict_answers(df, strategy="wmd")
+print("Accuracy (WMD):", accuracy_score(ground_truth, predictions))
+
+predictions = predict_answers(df, strategy="n_similarity")
+print("Accuracy (n_similarity):", accuracy_score(ground_truth, predictions))
+
 predictions = predict_answers(df, strategy="sif", pc=0)
 print("Accuracy (SIF) 0:", accuracy_score(ground_truth, predictions))
 
 predictions = predict_answers(df, strategy="sif", pc=1)
 print("Accuracy (SIF) 1:", accuracy_score(ground_truth, predictions))
+
+
+
 
 
 print("Stopwords Not Removed, Words Lemmatized, Custom Vectors")
@@ -282,11 +370,20 @@ print("Accuracy (Average):", accuracy_score(ground_truth, predictions))
 predictions = predict_answers(df, strategy="ema", lemmatize=True)
 print("Accuracy (EMA):", accuracy_score(ground_truth, predictions))
 
-predictions = predict_answers(df, strategy="sif", pc=0)
+predictions = predict_answers(df, strategy="wmd", lemmatize=True)
+print("Accuracy (WMD):", accuracy_score(ground_truth, predictions))
+
+predictions = predict_answers(df, strategy="n_similarity", lemmatize=True)
+print("Accuracy (n_similarity):", accuracy_score(ground_truth, predictions))
+
+predictions = predict_answers(df, strategy="sif", pc=0, lemmatize=True)
 print("Accuracy (SIF) 0:", accuracy_score(ground_truth, predictions))
 
-predictions = predict_answers(df, strategy="sif", pc=1)
+predictions = predict_answers(df, strategy="sif", pc=1, lemmatize=True)
 print("Accuracy (SIF) 1:", accuracy_score(ground_truth, predictions))
+
+
+
 
 
 
@@ -297,11 +394,22 @@ print("Accuracy (Average):", accuracy_score(ground_truth, predictions))
 predictions = predict_answers(df, strategy="ema", ignore_stopwords=True)
 print("Accuracy (EMA):", accuracy_score(ground_truth, predictions))
 
-predictions = predict_answers(df, strategy="sif", pc=0)
+predictions = predict_answers(df, strategy="wmd", ignore_stopwords=True)
+print("Accuracy (WMD):", accuracy_score(ground_truth, predictions))
+
+predictions = predict_answers(df, strategy="n_similarity", ignore_stopwords=True)
+print("Accuracy (n_similarity):", accuracy_score(ground_truth, predictions))
+
+predictions = predict_answers(df, strategy="sif", pc=0, ignore_stopwords=True)
 print("Accuracy (SIF) 0:", accuracy_score(ground_truth, predictions))
 
-predictions = predict_answers(df, strategy="sif", pc=1)
+predictions = predict_answers(df, strategy="sif", pc=1, ignore_stopwords=True)
 print("Accuracy (SIF) 1:", accuracy_score(ground_truth, predictions))
+
+
+
+
+
 
 
 print("Stopwords Removed, Words Lemmatized, Custom Vectors")
@@ -311,13 +419,17 @@ print("Accuracy (Average):", accuracy_score(ground_truth, predictions))
 predictions = predict_answers(df, strategy="ema", ignore_stopwords=True, lemmatize=True)
 print("Accuracy (EMA):", accuracy_score(ground_truth, predictions))
 
-predictions = predict_answers(df, strategy="sif", pc=0)
+predictions = predict_answers(df, strategy="wmd", ignore_stopwords=True, lemmatize=True)
+print("Accuracy (WMD):", accuracy_score(ground_truth, predictions))
+
+predictions = predict_answers(df, strategy="n_similarity", ignore_stopwords=True, lemmatize=True)
+print("Accuracy (n_similarity):", accuracy_score(ground_truth, predictions))
+
+predictions = predict_answers(df, strategy="sif", pc=0, ignore_stopwords=True, lemmatize=True)
 print("Accuracy (SIF) 0:", accuracy_score(ground_truth, predictions))
 
-predictions = predict_answers(df, strategy="sif", pc=1)
+predictions = predict_answers(df, strategy="sif", pc=1, ignore_stopwords=True, lemmatize=True)
 print("Accuracy (SIF) 1:", accuracy_score(ground_truth, predictions))
-
-
 
 ###################################################################################
 
@@ -353,6 +465,16 @@ print("Accuracy (Average):", accuracy_score(ground_truth, predictions))
 predictions = predict_answers(df, strategy="ema")
 print("Accuracy (EMA):", accuracy_score(ground_truth, predictions))
 
+#predictions = predict_answers(df, strategy="wmd")
+#print("Accuracy (WMD):", accuracy_score(ground_truth, predictions))
+
+#predictions = predict_answers(df, strategy="n_similarity")
+#print("Accuracy (n_similarity):", accuracy_score(ground_truth, predictions))
+
+
+
+
+#tmp_file = get_tmpfile(os.path.join(os.getcwd(), '.glove_to_word2vec.txt'))
 
 
 print("Stopwords Not Removed, Words Lemmatized, Glove Vectors")
@@ -361,6 +483,13 @@ print("Accuracy (Average):", accuracy_score(ground_truth, predictions))
 
 predictions = predict_answers(df, strategy="ema", lemmatize=True)
 print("Accuracy (EMA):", accuracy_score(ground_truth, predictions))
+
+#predictions = predict_answers(df, strategy="wmd", lemmatize=True)
+#print("Accuracy (WMD):", accuracy_score(ground_truth, predictions))
+
+#predictions = predict_answers(df, strategy="n_similarity", lemmatize=True)
+#print("Accuracy (n_similarity):", accuracy_score(ground_truth, predictions))
+
 
 
 
@@ -372,6 +501,14 @@ print("Accuracy (Average):", accuracy_score(ground_truth, predictions))
 predictions = predict_answers(df, strategy="ema", ignore_stopwords=True)
 print("Accuracy (EMA):", accuracy_score(ground_truth, predictions))
 
+#predictions = predict_answers(df, strategy="wmd", ignore_stopwords=True)
+#print("Accuracy (WMD):", accuracy_score(ground_truth, predictions))
+
+#predictions = predict_answers(df, strategy="n_similarity", ignore_stopwords=True)
+#print("Accuracy (n_similarity):", accuracy_score(ground_truth, predictions))
+
+
+
 
 
 
@@ -382,3 +519,10 @@ print("Accuracy (Average):", accuracy_score(ground_truth, predictions))
 predictions = predict_answers(df, strategy="ema", ignore_stopwords=True, lemmatize=True)
 print("Accuracy (EMA):", accuracy_score(ground_truth, predictions))
 
+
+
+#predictions = predict_answers(df, strategy="wmd", ignore_stopwords=True, lemmatize=True)
+#print("Accuracy (WMD):", accuracy_score(ground_truth, predictions))
+
+#predictions = predict_answers(df, strategy="n_similarity", ignore_stopwords=True, lemmatize=True)
+#print("Accuracy (n_similarity):", accuracy_score(ground_truth, predictions))
