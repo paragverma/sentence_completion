@@ -4,6 +4,10 @@
 Exports of `conda env export` and `pip freeze` are inlcuded in the `\environment` directory as `environment.yml` and `requirements.txt` respectively.
 To install required modules using pip `>pip install -r requirements.txt`, or
 set up new conda environment.txt `>conda env create -f environment.yml`
+
+#### Important Notes
+Keep the directory structure same as this repository
+Execute each file from the directory the file is in.
 ### Directory Overview
 - **baseline_and_refinements.py:** This file contains code for the Baseline Model and its Refinements
 - **/bert_experiments:** This  directory contains experiments related to BERT. All experiments are in files named *test_<num>.py*. More details are given in later sections
@@ -54,3 +58,56 @@ Strategy: Predict blank using BERT, the calculate BERT vectors similarity betwee
     - Run `> python test2.py`
 
 
+3. `test3.py':
+Strategy: Create sentence vector from word vectors for each sentence by ignoring the blank. Obtain word vectors for each option. Compute cosine distance between each option and sentence, least distance option is chosen. Word Vectors obtained using BERT.
+
+    See instructions for starting BERT server in `test2.py`. Start BERT server with some aggregation strategy, edit the file with IP address of server.
+    
+    Run `> python test3.py`
+
+4. `test4.py`:
+Strategy: For each option, replace blank with the option, then using BERT, calculate total cross entropy loss. The option which causes least loss is the chosen option.
+
+    Run `> python test4.py`
+
+5. `test5.py`:
+Strategy: Predict blank using BERT, the calculate word2vec(Corpus trained) similarity between predicted word and options to chose closest option. Also for Fine-tune BERT as well.
+
+    - In `test5.py`, edit this line `w2v_model = gensim.models.Word2Vec.load(os.path.join(os.getcwd(), os.pardir, "word2vec_models", "word2vec_model_skip_window12.model"))`, with `word2vec_model_skip_window4.model`, `word2vec_model_skip_window8.model` or `word2vec_model_skip_window12.model` for different window sizes, or your own word2vec model.
+    
+    - For using Fine-tuned BERT model, or your own BERT model, comment lines `14-16`, i.e. 
+        ```
+        bertmodelname = 'bert-large-uncased-whole-word-masking'
+        tokenizer = BertTokenizer.from_pretrained(bertmodelname)
+        model = BertForMaskedLM.from_pretrained(bertmodelname)
+        ```
+        and uncomment lines `20-24`, i.e.
+        ```
+        bertmodelname = 'bert-large-uncased-whole-word-masking'
+        tokenizer = BertTokenizer.from_pretrained(bertmodelname)
+        bertsavedmodelname = "pytorch_model3.bin"
+        model_state_dict = torch.load(bertsavedmodelname)
+        model = BertForMaskedLM.from_pretrained(pretrained_model_name_or_path=bertmodelname, state_dict=model_state_dict)
+        ```
+        
+        Replace `"pytorch_model3.bin"` with `"/bert_models/pytorch_model1.bin"` for first 100,000 sentences, `"/bert_models/pytorch_model1.bin"` for first 200,000 sentences, `"/bert_models/pytorch_model3.bin"` for first 300,000 sentences, or your own BERT model. 
+    
+    - (Optional) For fine-tuning BERT, run `run_lm_finetuning.py`. This script is taken from https://github.com/huggingface/transformers. Usage:
+        ```python run_lm_finetuning.py \
+        --output_dir=output \
+        --model_type=bert \
+        --model_name_or_path=bert-large-uncased-whole-word-masking \
+        --do_train \
+        --train_data_file=$TRAIN_FILE \
+        ```
+        `$TRAIN_FILE` should be `/cleaned_corpus/cleaned_data.txt`
+    - Run `> python test5.py`
+
+6. `test6.py`:
+Strategy: Same as `test2.py`, predict blank using BERT, the calculate BERT vectors similarity between predicted word and options to chose closest option. In this experiment, we perform the aggregations ourselves instead of pooling functions of the library.
+
+    Steps:
+        - Start BERT-server
+            - `> cd bert_models`
+            - Start bert-server (see instructions for `test2.py`), with pooling strategy set to NONE, i.e. pass `--pooling_strategy NONE` while starting server
+            - `> python test6.py`
