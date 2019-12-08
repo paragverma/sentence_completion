@@ -93,7 +93,8 @@ Strategy: Predict blank using BERT, the calculate word2vec(Corpus trained) simil
         Replace `"pytorch_model3.bin"` with `"/bert_models/pytorch_model1.bin"` for first 100,000 sentences, `"/bert_models/pytorch_model1.bin"` for first 200,000 sentences, `"/bert_models/pytorch_model3.bin"` for first 300,000 sentences, or your own BERT model. 
     
     - (Optional) For fine-tuning BERT, run `run_lm_finetuning.py`. This script is taken from https://github.com/huggingface/transformers. Usage:
-        ```python run_lm_finetuning.py \
+        ```
+        python run_lm_finetuning.py \
         --output_dir=output \
         --model_type=bert \
         --model_name_or_path=bert-large-uncased-whole-word-masking \
