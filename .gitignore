@@ -1,6 +1,4 @@
 .DS_Store
 cleaned_data.txt
-bert_models/*
-word2vec_models/*
 *__pycache__*
 bert_experiments/__pycache__/*
