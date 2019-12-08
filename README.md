@@ -109,6 +109,6 @@ Strategy: Same as `test2.py`, predict blank using BERT, the calculate BERT vecto
 
     Steps:
     - Start BERT-server
-        - `> cd bert_models`
-        - Start bert-server (see instructions for `test2.py`), with pooling strategy set to NONE, i.e. pass `--pooling_strategy NONE` while starting server
-        - `> python test6.py`
+    - `> cd bert_models`
+    - Start bert-server (see instructions for `test2.py`), with pooling strategy set to NONE, i.e. pass `--pooling_strategy NONE` while starting server
+    - `> python test6.py`
