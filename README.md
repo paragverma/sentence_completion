@@ -108,7 +108,7 @@ Strategy: Predict blank using BERT, the calculate word2vec(Corpus trained) simil
 Strategy: Same as `test2.py`, predict blank using BERT, the calculate BERT vectors similarity between predicted word and options to chose closest option. In this experiment, we perform the aggregations ourselves instead of pooling functions of the library.
 
     Steps:
-        - Start BERT-server
-            - `> cd bert_models`
-            - Start bert-server (see instructions for `test2.py`), with pooling strategy set to NONE, i.e. pass `--pooling_strategy NONE` while starting server
-            - `> python test6.py`
+    - Start BERT-server
+        - `> cd bert_models`
+        - Start bert-server (see instructions for `test2.py`), with pooling strategy set to NONE, i.e. pass `--pooling_strategy NONE` while starting server
+        - `> python test6.py`
