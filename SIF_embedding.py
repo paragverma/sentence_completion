@@ -1,5 +1,9 @@
 import numpy as np
 from sklearn.decomposition import TruncatedSVD
+import warnings
+
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 #returns 1 * VECTOR_DIM
 def get_weighted_average(We, weights):

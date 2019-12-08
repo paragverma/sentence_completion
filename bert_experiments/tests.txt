@@ -1,0 +1,38 @@
+1. #BERT predict word
+#Calculate w2v similarity between word and options (word2vec gensim googlenews)
+
+Files required: 1040, Googlenews
+
+2. #BERT predict word
+#Calculate vec similarity between word and options (BERT server vectors)
+
+
+Files required: 1040, Bert server running
+Multiple configurations
+
+3. #BERT server encode sentence
+#BERT server encode all options
+#Calculate vector similarity
+
+Same as above
+
+4. #BERT sentence loss
+#Substitute [MASK] with each option and calculate loss. Min loss wins
+
+5. #BERT predict word
+#Calculate w2v similarity between word and options (word2vec custom, new preprocessing, window4, 8)
+
+Googlenews, custom word2vec models
+Also, custom py torch models
+
+run_lm_fintenuning.py
+
+6.. #BERT predict word
+#Calculate vec similarity between word and options (BERT server vectors)
+#Custom vector aggregation
+
+EMA, Average etc
+Bet client server
+ 
+
+ 

@@ -3,6 +3,10 @@ import unidecode
 from collections import Counter
 import spacy
 import logging
+import warnings
+
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 #logging.basicConfig(level=logging.INFO)
 
@@ -92,7 +96,7 @@ def process_all_docs(directory="data/Holmes_Training_Data", save_cleaned_docs=Tr
                     line = sent.text
                     #print(line)
                     #all_lines_raw.append(line)
-                    clean_sentence = clean_str(line)
+                    clean_sentence = clean_str_simple(line)
                     clean_sentence = " ".join([token.lemma_ for token in spacy_nlp(clean_sentence) if token.lemma_ != "-PRON-"])
                     #print(clean_sentence)
                     if(len(clean_sentence.split()) > 2):

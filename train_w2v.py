@@ -1,33 +1,13 @@
-import preprocess
-import pickle
-
-
-def save_sentences():
-    all_sentences, unique_tokens = preprocess.process_all_docs(directory="data/Holmes_Training_Data",
-                                                               save_cleaned_docs=False,
-                                                               break_at_sentence=None)
-    with open("all_sentences.pkl", "wb") as f:
-        pickle.dump(all_sentences, f)
-    with open("unique_tokens.pkl", "wb") as f:
-        pickle.dump(unique_tokens, f)
-
-def load_sentences():
-    all_sentences = []
-    unique_tokens = None
-    
-    with open("all_sentences.pkl", "rb") as f:
-        all_sentences = pickle.load(f)
-    with open("unique_tokens.pkl", "rb") as f:
-        unique_tokens = pickle.load(f)
-    
-    return all_sentences, unique_tokens
-
-save_sentences()
-all_sentences, unique_tokens = load_sentences()
-
 from gensim.models import Word2Vec
 import gensim
-model = Word2Vec(all_sentences, workers=8, size=300)
-model.wv.save_word2vec_format("word2vec_model.gsm")
+
+all_sentences = []
+
+with open("cleaned_corpus/cleaned_data.txt", "r") as f:
+    for line in f.readlines():
+        all_sentences.append(line.split())
+
+model = Word2Vec(all_sentences, sg=1, window=12, workers=8, size=300)
+model.save("word2vec_model_skip_window12.model")
 
 load_model = gensim.models.KeyedVectors.load_word2vec_format("word2vec_model_custom.gsm")
